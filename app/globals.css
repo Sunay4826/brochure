@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-brochure-serif), ui-serif, Georgia, serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +23,23 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+@media print {
+  body {
+    background: white;
+    margin: 0;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  #brochure-print-root {
+    break-inside: avoid;
+    margin: 0;
+    width: 100%;
+  }
 }
