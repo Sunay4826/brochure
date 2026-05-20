@@ -14,13 +14,39 @@ function cleanText(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+function isUsefulBody(body: string): boolean {
+  const text = cleanText(body);
+  return text.length >= 35 && !/^see the live site/i.test(text);
+}
+
+function isWeakTitle(title: string): boolean {
+  const text = title.toLowerCase();
+  return (
+    title.length < 3 ||
+    /^(resources|more|legal|footer|navigation|menu|social|subscribe)$/i.test(
+      title
+    ) ||
+    text.includes("placeholder")
+  );
+}
+
+function appendUniqueText(target: string[], text: string, min = 24): void {
+  const cleaned = cleanText(text);
+  if (cleaned.length < min || cleaned.length > 700) return;
+  const key = cleaned.toLowerCase();
+  if (target.some((item) => item.toLowerCase() === key)) return;
+  target.push(cleaned);
+}
+
 export function extractBrochureFromHtml(
   html: string,
   sourceUrl: string
 ): BrochureData {
   const $ = cheerio.load(html);
 
-  $("script, style, noscript, iframe, svg, template").remove();
+  $(
+    "script, style, noscript, iframe, svg, template, nav, header nav, footer"
+  ).remove();
 
   const hostname = new URL(sourceUrl).hostname.replace(/^www\./, "");
 
@@ -40,49 +66,62 @@ export function extractBrochureFromHtml(
 
   $("h1, h2").each((_, el) => {
     const title = cleanText($(el).text());
-    if (!title || title.length > 140) return;
+    if (!title || title.length > 140 || isWeakTitle(title)) return;
     const key = title.toLowerCase();
     if (seenTitles.has(key)) return;
     seenTitles.add(key);
 
-    let body = "";
+    const bodyParts: string[] = [];
     let sib = $(el).next();
     let hops = 0;
-    while (sib.length && hops < 6) {
+    while (sib.length && hops < 8 && bodyParts.length < 4) {
       const tag = sib.prop("tagName")?.toLowerCase() ?? "";
       if (tag === "h1" || tag === "h2") break;
       if (tag === "p") {
-        const t = cleanText(sib.text());
-        if (t.length > 20) body += t + "\n\n";
+        appendUniqueText(bodyParts, sib.text());
       }
       if (tag === "ul" || tag === "ol") {
         sib.find("li").each((__, li) => {
           const t = cleanText($(li).text());
-          if (t.length > 5) body += "• " + t + "\n";
+          if (t.length > 10 && t.length < 180) {
+            appendUniqueText(bodyParts, `• ${t}`, 12);
+          }
         });
-        body += "\n";
       }
       sib = sib.next();
       hops++;
     }
-    body = body.trim().slice(0, 900);
-    sections.push({
-      title,
-      body: body || "See the live site for full details.",
-    });
+
+    if (bodyParts.length === 0) {
+      const container = $(el).closest("section, article, div").first();
+      container.find("p, li").slice(0, 12).each((__, child) => {
+        const prefix = child.tagName?.toLowerCase() === "li" ? "• " : "";
+        appendUniqueText(bodyParts, `${prefix}${$(child).text()}`);
+      });
+    }
+
+    const body = bodyParts.slice(0, 4).join("\n\n").trim().slice(0, 900);
+    if (isUsefulBody(body)) {
+      sections.push({ title, body });
+    }
   });
 
-  if (sections.length === 0) {
+  if (sections.length < 3) {
     const container = $("main, article, [role='main'], body").first();
     const paras: string[] = [];
-    container.find("p").each((_, p) => {
-      const t = cleanText($(p).text());
-      if (t.length > 50 && t.length < 600) paras.push(t);
+    container.find("p, li").each((_, p) => {
+      appendUniqueText(paras, $(p).text(), 45);
     });
-    const slice = paras.slice(0, 6);
-    slice.forEach((p, i) => {
+    const fallbackSections = [
+      "Overview",
+      "What it offers",
+      "Why it matters",
+      "Who it helps",
+      "How to start",
+    ];
+    paras.slice(0, 5).forEach((p, i) => {
       sections.push({
-        title: i === 0 ? "Overview" : `Highlight ${i + 1}`,
+        title: fallbackSections[i] || `Highlight ${i + 1}`,
         body: p,
       });
     });
@@ -102,7 +141,15 @@ export function extractBrochureFromHtml(
   const seenHi = new Set<string>();
   $("main li, article li, body li").each((_, li) => {
     const t = cleanText($(li).text());
-    if (t.length < 12 || t.length > 220) return;
+    if (
+      t.length < 12 ||
+      t.length > 180 ||
+      /^(docs|learn|showcase|blog|team|analytics|contact|privacy|legal)$/i.test(
+        t
+      )
+    ) {
+      return;
+    }
     const k = t.toLowerCase();
     if (seenHi.has(k)) return;
     seenHi.add(k);
@@ -111,12 +158,12 @@ export function extractBrochureFromHtml(
 
   const finalTagline =
     tagline.slice(0, 360) ||
-    `Marketing-style snapshot generated from ${hostname}. Open the source link for the full experience.`;
+    `A concise brochure preview generated from ${hostname}.`;
 
   return {
     siteName: siteName.slice(0, 120),
     tagline: finalTagline,
-    sections: sections.slice(0, 10),
+    sections: sections.filter((section) => isUsefulBody(section.body)).slice(0, 10),
     highlights: highlights.slice(0, 10),
     sourceUrl,
   };

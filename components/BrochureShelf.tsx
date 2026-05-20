@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import type { BrochureData } from "@/lib/extract-brochure";
+import type { RagSource } from "@/lib/rag";
 
 const STORAGE_KEY = "brochure-shelf-v1";
 
@@ -15,6 +16,7 @@ export type SavedBrochure = {
   mode?: "layout" | "day5";
   markdownBrochure?: string;
   selectedLinks?: { type: string; url: string }[];
+  ragSources?: RagSource[];
 };
 
 /** Stable empty snapshot — React requires getServerSnapshot to return the same reference across calls. */
@@ -110,6 +112,9 @@ export function BrochureShelf({ current, onSelect, onSaved }: Props) {
     getShelfSnapshot,
     getServerShelfSnapshot
   );
+  const currentIsSaved = Boolean(
+    current && items.some((item) => item.id === current.id)
+  );
 
   const persist = useCallback((next: SavedBrochure[]) => {
     saveShelf(next);
@@ -144,6 +149,15 @@ export function BrochureShelf({ current, onSelect, onSaved }: Props) {
         <p className="mt-1">
           Generate a brochure, then save it here to build a small library.
         </p>
+        {current ? (
+          <button
+            type="button"
+            onClick={saveCurrent}
+            className="mt-4 w-full rounded-lg border border-teal-700/30 bg-teal-700/10 py-2 text-sm font-medium text-teal-900 hover:bg-teal-700/15 dark:border-teal-500/30 dark:bg-teal-950/40 dark:text-teal-100"
+          >
+            Save this brochure to shelf
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -195,9 +209,10 @@ export function BrochureShelf({ current, onSelect, onSaved }: Props) {
         <button
           type="button"
           onClick={saveCurrent}
-          className="mt-3 w-full rounded-lg border border-teal-700/30 bg-teal-700/10 py-2 text-sm font-medium text-teal-900 hover:bg-teal-700/15 dark:border-teal-500/30 dark:bg-teal-950/40 dark:text-teal-100"
+          disabled={currentIsSaved}
+          className="mt-3 w-full rounded-lg border border-teal-700/30 bg-teal-700/10 py-2 text-sm font-medium text-teal-900 hover:bg-teal-700/15 disabled:cursor-default disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-teal-500/30 dark:bg-teal-950/40 dark:text-teal-100 dark:disabled:border-zinc-800 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500"
         >
-          Save this brochure to shelf
+          {currentIsSaved ? "Saved to shelf" : "Save this brochure to shelf"}
         </button>
       ) : null}
     </div>
@@ -211,6 +226,7 @@ export function makeSavedBrochure(
     mode?: "layout" | "day5";
     markdownBrochure?: string;
     selectedLinks?: { type: string; url: string }[];
+    ragSources?: RagSource[];
   }
 ): SavedBrochure {
   return {
@@ -226,5 +242,6 @@ export function makeSavedBrochure(
     mode: options?.mode ?? "layout",
     markdownBrochure: options?.markdownBrochure,
     selectedLinks: options?.selectedLinks,
+    ragSources: options?.ragSources,
   };
 }

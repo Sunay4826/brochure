@@ -3,14 +3,19 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --font-brochure-sans: Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-brochure-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+    monospace;
+  --font-brochure-serif: Georgia, "Times New Roman", Times, serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-serif: var(--font-brochure-serif), ui-serif, Georgia, serif;
+  --font-sans: var(--font-brochure-sans);
+  --font-mono: var(--font-brochure-mono);
+  --font-serif: var(--font-brochure-serif);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,11 +28,20 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-brochure-sans);
   text-rendering: optimizeLegibility;
 }
 
+.brochure-sheet {
+  page-break-inside: avoid;
+}
+
 @media print {
+  @page {
+    margin: 0.5in;
+    size: auto;
+  }
+
   body {
     background: white;
     margin: 0;
@@ -41,5 +55,10 @@ body {
     break-inside: avoid;
     margin: 0;
     width: 100%;
+  }
+
+  .brochure-sheet {
+    color: #171717;
+    page-break-inside: avoid;
   }
 }

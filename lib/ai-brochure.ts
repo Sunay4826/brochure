@@ -1,4 +1,4 @@
-import { geminiGenerate } from "./gemini-client";
+import { groqGenerate } from "./groq-client";
 import { getLlmBackend } from "./llm-provider";
 import type { BrochureData } from "./extract-brochure";
 
@@ -30,7 +30,7 @@ ${JSON.stringify({
 
   let text: string | undefined;
   try {
-    text = await geminiGenerate({
+    text = await groqGenerate({
       systemInstruction:
         "You are a concise marketing copy editor. Respond with JSON only.",
       prompt,

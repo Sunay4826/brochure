@@ -2,9 +2,14 @@
 
 import { useCallback, useState } from "react";
 import type { BrochureData } from "@/lib/extract-brochure";
+import type { RagSource } from "@/lib/rag";
 import { BrochurePreview } from "@/components/BrochurePreview";
 import { MarkdownBrochure } from "@/components/MarkdownBrochure";
-import { makeSavedBrochure, type SavedBrochure } from "@/components/BrochureShelf";
+import {
+  BrochureShelf,
+  makeSavedBrochure,
+  type SavedBrochure,
+} from "@/components/BrochureShelf";
 
 type ApiOk = {
   ok: true;
@@ -14,6 +19,7 @@ type ApiOk = {
   mode: "layout" | "day5";
   markdownBrochure?: string;
   selectedLinks?: { type: string; url: string }[];
+  ragSources?: RagSource[];
   warning?: string;
 };
 
@@ -34,6 +40,7 @@ export default function Home() {
   const [useAi, setUseAi] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [active, setActive] = useState<ActiveView>({ source: "empty" });
   const [previewTab, setPreviewTab] = useState<PreviewTab>("flyer");
 
@@ -44,6 +51,7 @@ export default function Home() {
 
   const generate = useCallback(async () => {
     setError(null);
+    setSavedNotice(null);
     setLoading(true);
     try {
       const body: Record<string, unknown> = {
@@ -80,6 +88,7 @@ export default function Home() {
           mode: json.mode,
           markdownBrochure: json.markdownBrochure,
           selectedLinks: json.selectedLinks,
+          ragSources: json.ragSources,
         }),
       });
     } catch {
@@ -92,6 +101,14 @@ export default function Home() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleSelectSaved = (brochure: SavedBrochure) => {
+    setActive({ source: "shelf", brochure });
+    setUrl(brochure.sourceUrl);
+    setPreviewTab(brochure.markdownBrochure ? "markdown" : "flyer");
+    setError(null);
+    setSavedNotice("Loaded from your shelf.");
   };
 
   return (
@@ -115,7 +132,7 @@ export default function Home() {
                   Fast flyer mode
                 </span>
                 <span className="rounded-full border border-zinc-300 bg-white px-3 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-                  Smart AI mode
+                  Smart RAG mode
                 </span>
                 <span className="rounded-full border border-zinc-300 bg-white px-3 py-1 dark:border-zinc-700 dark:bg-zinc-900">
                   Print-ready output
@@ -123,58 +140,59 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-950 lg:sticky lg:top-6">
-              <div className="space-y-4">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Website URL
-                  <input
-                    type="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://example.com"
-                    className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-3 text-zinc-900 shadow-sm outline-none ring-teal-600/30 focus:border-teal-600 focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                  />
-                </label>
+            <div className="space-y-4 lg:sticky lg:top-6">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Website URL
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      placeholder="https://example.com"
+                      className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-3 text-zinc-900 shadow-sm outline-none ring-teal-600/30 focus:border-teal-600 focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                    />
+                  </label>
 
-                <fieldset className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300">
-                  <legend className="font-medium">Generator</legend>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/30">
-                      <input
-                        type="radio"
-                        name="mode"
-                        checked={mode === "layout"}
-                        onChange={() => setMode("layout")}
-                        className="border-zinc-400 text-teal-700"
-                      />
-                      <div>
-                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                          Flyer
+                  <fieldset className="space-y-2.5 text-sm text-zinc-700 dark:text-zinc-300">
+                    <legend className="font-medium">Generator</legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/30">
+                        <input
+                          type="radio"
+                          name="mode"
+                          checked={mode === "layout"}
+                          onChange={() => setMode("layout")}
+                          className="border-zinc-400 text-teal-700"
+                        />
+                        <div>
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                            Flyer
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            Single‑page layout
+                          </div>
                         </div>
-                        <div className="text-xs text-zinc-500">
-                          Single‑page layout
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/30">
+                        <input
+                          type="radio"
+                          name="mode"
+                          checked={mode === "day5"}
+                          onChange={() => setMode("day5")}
+                          className="border-zinc-400 text-teal-700"
+                        />
+                        <div>
+                          <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                            Smart
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            RAG + AI
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                    <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/30">
-                      <input
-                        type="radio"
-                        name="mode"
-                        checked={mode === "day5"}
-                        onChange={() => setMode("day5")}
-                        className="border-zinc-400 text-teal-700"
-                      />
-                      <div>
-                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                          Smart
-                        </div>
-                        <div className="text-xs text-zinc-500">
-                          Multi‑page + AI
-                        </div>
-                      </div>
-                    </label>
-                  </div>
-                </fieldset>
+                      </label>
+                    </div>
+                  </fieldset>
 
                 {mode === "day5" ? (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -216,32 +234,44 @@ export default function Home() {
                   </label>
                 )}
 
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => void generate()}
-                    disabled={loading || !url.trim()}
-                    className="inline-flex items-center justify-center rounded-xl bg-teal-800 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-900 disabled:opacity-50 dark:bg-teal-700 dark:hover:bg-teal-600"
-                  >
-                    {loading ? "Generating…" : "Generate"}
-                  </button>
-                  {displayBrochure ? (
+                  <div className="flex flex-wrap gap-3 pt-1">
                     <button
                       type="button"
-                      onClick={handlePrint}
-                      className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      onClick={() => void generate()}
+                      disabled={loading || !url.trim()}
+                      className="inline-flex items-center justify-center rounded-xl bg-teal-800 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-900 disabled:opacity-50 dark:bg-teal-700 dark:hover:bg-teal-600"
                     >
-                      Print / PDF
+                      {loading ? "Generating…" : "Generate"}
                     </button>
+                    {displayBrochure ? (
+                      <button
+                        type="button"
+                        onClick={handlePrint}
+                        className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        Print / PDF
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {savedNotice ? (
+                    <div className="rounded-xl border border-teal-200 bg-teal-50 px-3.5 py-3 text-sm text-teal-900 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-100">
+                      {savedNotice}
+                    </div>
+                  ) : null}
+
+                  {error ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                      {error}
+                    </div>
                   ) : null}
                 </div>
-
-                {error ? (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-                    {error}
-                  </div>
-                ) : null}
               </div>
+              <BrochureShelf
+                current={displayBrochure}
+                onSelect={handleSelectSaved}
+                onSaved={() => setSavedNotice("Saved to your shelf.")}
+              />
             </div>
           </div>
         </div>
@@ -255,28 +285,28 @@ export default function Home() {
                 <>
                   <div className="no-print mb-4 flex justify-center">
                     <div className="inline-flex rounded-xl border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewTab("flyer")}
-                      className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                        previewTab === "flyer"
-                          ? "bg-teal-800 text-white dark:bg-teal-700"
-                          : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                      }`}
-                    >
-                      Flyer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewTab("markdown")}
-                      className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                        previewTab === "markdown"
-                          ? "bg-teal-800 text-white dark:bg-teal-700"
-                          : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                      }`}
-                    >
-                      AI brochure
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab("flyer")}
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                          previewTab === "flyer"
+                            ? "bg-teal-800 text-white dark:bg-teal-700"
+                            : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                        }`}
+                      >
+                        Flyer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab("markdown")}
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                          previewTab === "markdown"
+                            ? "bg-teal-800 text-white dark:bg-teal-700"
+                            : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                        }`}
+                      >
+                        AI brochure
+                      </button>
                     </div>
                   </div>
                   {previewTab === "markdown" &&
@@ -284,7 +314,6 @@ export default function Home() {
                     <MarkdownBrochure
                       markdown={displayBrochure.markdownBrochure}
                       sourceUrl={displayBrochure.sourceUrl}
-                      selectedLinks={displayBrochure.selectedLinks}
                     />
                   ) : (
                     <BrochurePreview

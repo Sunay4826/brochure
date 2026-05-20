@@ -1,28 +1,35 @@
 /**
- * Week 1 Day 5 brochure flow (Ed Donner course), ported from
- * `llm_engineering/week1/community-contributions/rwothoromo/day5.ipynb`:
+ * Smart brochure flow:
  * 1) LLM picks relevant links (JSON)
  * 2) Fetch landing + selected pages
- * 3) LLM writes a markdown brochure
+ * 3) Chunk and retrieve the best passages with local keyword RAG
+ * 4) LLM writes a markdown brochure from retrieved context
  *
- * LLM: Gemini only.
+ * LLM: Groq.
  */
 
-import { geminiGenerate } from "./gemini-client";
+import { groqGenerate } from "./groq-client";
 import { getLlmBackend } from "./llm-provider";
 import { assertPublicHttpUrl } from "./ssrf";
 import {
   FETCH_HEADERS,
-  formatWebpageContents,
+  fetchPublicUrl,
   parsePageLikeWebsiteClass,
   type ParsedPage,
 } from "./fetch-page";
+import {
+  formatRagContext,
+  retrieveRelevantChunks,
+  type RagDocument,
+  type RagSource,
+} from "./rag";
 
 /** Step 1 — same wording as the course notebook. */
 export const LINK_SYSTEM_PROMPT =
   "You are provided with a list of links found on a webpage. " +
-  "You are able to decide which of the links would be most relevant to include in a brochure about the company, " +
-  "such as links to an About page, or a Company page, or Careers/Jobs pages.\n" +
+  "Choose links that would help create a useful customer-facing brochure about the website's actual offering. " +
+  "Prefer product, features, docs/get-started, pricing, customers/showcase, case studies, about, contact, and blog/release pages. " +
+  "Only include careers/jobs/team pages when the site is clearly recruiting or when those pages explain the organization in a brochure-relevant way.\n" +
   "You should respond in JSON as in this example:" +
   `
 {
@@ -60,9 +67,9 @@ function linksUserPrompt(websiteUrl: string, rawLinks: string[]): string {
   const capped = rawLinks.slice(0, 200);
   let userPrompt = `Here is the list of links on the website of ${websiteUrl} - `;
   userPrompt +=
-    "please decide which of these are relevant web links for a brochure about the company, respond with the full https URL in JSON format. ";
+    "please decide which links are most useful for a polished brochure about the product, service, or organization. Respond with the full https URL in JSON format. ";
   userPrompt +=
-    "Do not include Terms of Service, Privacy, email links.\nLinks (some might be relative links):\n";
+    "Do not include Terms of Service, Privacy, cookie, telemetry, governance, social, email, or generic GitHub links unless the website itself is mainly an open-source developer project.\nLinks (some might be relative links):\n";
   userPrompt += capped.join("\n");
   return userPrompt;
 }
@@ -117,7 +124,7 @@ async function llmJsonLinks(
 ): Promise<SelectedLink[]> {
   const user = linksUserPrompt(websiteUrl, landing.links);
 
-  const raw = await geminiGenerate({
+  const raw = await groqGenerate({
     systemInstruction: LINK_SYSTEM_PROMPT,
     prompt: user,
     jsonMode: true,
@@ -135,9 +142,8 @@ export async function llmSelectLinks(
 }
 
 async function fetchHtml(url: string): Promise<string> {
-  const res = await fetch(url, {
+  const res = await fetchPublicUrl(url, {
     headers: FETCH_HEADERS,
-    redirect: "follow",
     signal: AbortSignal.timeout(22_000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
@@ -148,14 +154,26 @@ async function fetchHtml(url: string): Promise<string> {
   return res.text();
 }
 
-async function gatherAllDetails(
+async function gatherRagContext(
   baseUrl: string,
+  companyName: string,
   landingHtml: string,
+  tone: BrochureTone,
   maxExtraPages: number
-): Promise<{ text: string; selectedLinks: SelectedLink[] }> {
+): Promise<{
+  context: string;
+  selectedLinks: SelectedLink[];
+  retrievedSources: RagSource[];
+}> {
   const landing = parsePageLikeWebsiteClass(landingHtml);
-  let result = "Landing page:\n";
-  result += formatWebpageContents(landing);
+  const documents: RagDocument[] = [
+    {
+      title: landing.title,
+      url: baseUrl,
+      type: "landing page",
+      text: landing.text,
+    },
+  ];
 
   const selected = await llmSelectLinks(baseUrl, landing);
   const limited = selected.slice(0, maxExtraPages);
@@ -165,53 +183,86 @@ async function gatherAllDetails(
       const html = await fetchHtml(link.url);
       if (html.length > 1_200_000) continue;
       const page = parsePageLikeWebsiteClass(html);
-      result += `\n\n${link.type}\n`;
-      result += formatWebpageContents(page);
+      documents.push({
+        title: page.title,
+        url: link.url,
+        type: link.type,
+        text: page.text,
+      });
     } catch {
       /* skip broken secondary pages */
     }
   }
 
-  return { text: result, selectedLinks: limited };
+  const retrievalQuery = [
+    companyName,
+    "brochure overview value proposition product features services benefits",
+    "who it is for customers showcase proof use cases pricing getting started",
+    "docs learn releases performance reliability developer experience",
+    tone === "humorous" ? "memorable playful entertaining" : "professional concise credible",
+  ].join(" ");
+  const retrievedSources = retrieveRelevantChunks(documents, retrievalQuery, {
+    topK: 9,
+  });
+
+  return {
+    context: formatRagContext(retrievedSources, 12_000),
+    selectedLinks: limited,
+    retrievedSources,
+  };
 }
 
 function brochureSystemPrompt(tone: BrochureTone): string {
+  const base =
+    "You create a polished, customer-facing markdown brochure from retrieved website context. " +
+    "Write about what the site actually offers: product, service, benefits, audience, use cases, proof points, and next steps. " +
+    "Use only facts supported by the retrieved context. Do not invent statistics, customers, culture, hiring, careers, investors, or company claims. " +
+    "If a category is not supported by the context, omit it entirely. " +
+    "Do not mention RAG, retrieval, source chunks, scores, or internal pipeline details. " +
+    "Avoid generic filler and avoid saying 'amazing applications' unless that phrase appears in the context. " +
+    "Use this exact markdown structure: one '# Title', then one plain subtitle paragraph with no heading marker, then 4 to 6 '## Section' blocks. " +
+    "Do not use '###' headings. Do not create report-style labels unless they work as brochure section names. " +
+    "End with a short call to action based on the source site.";
+
   if (tone === "humorous") {
     return (
-      "You are an assistant that analyzes the contents of several relevant pages from a company website " +
-      "and creates a short humorous, entertaining, jokey brochure about the company for prospective customers, investors and recruits. Respond in markdown. " +
-      "Include details of company culture, customers and careers/jobs if you have the information."
+      base +
+      " Keep the tone witty and light, but keep every factual claim grounded in the context. Respond in markdown."
     );
   }
-  return (
-    "You are an assistant that analyzes the contents of several relevant pages from a company website " +
-    "and creates a short brochure about the company for prospective customers, investors and recruits. Respond in markdown. " +
-    "Include details of company culture, customers and careers/jobs if you have the information."
-  );
+  return base + " Keep the tone professional, specific, and concise. Respond in markdown.";
 }
 
 function brochureUserPrompt(
   companyName: string,
   url: string,
-  details: string,
+  retrievedContext: string,
   maxChars: number
 ): string {
   let userPrompt = `You are looking at a company called: ${companyName}\n`;
   userPrompt +=
-    "Here are the contents of its landing page and other relevant pages; use this information to build a short brochure of the company in markdown.\n";
+    `Source URL: ${url}\n`;
   userPrompt +=
-    "Keep the details brief or concise, factoring in that they would be printed on a simple hand-out flyer.\n";
-  userPrompt += details;
+    "Use only the retrieved context below to build a short brochure in markdown. Do not invent facts that are not supported by the retrieved context.\n";
+  userPrompt +=
+    "Make the brochure useful to a visitor deciding whether to use this product/service. Prefer concrete capabilities, benefits, audience, proof, and next steps over generic company sections.\n";
+  userPrompt +=
+    "Only include sections like Company Culture, Customers, Careers, or Investors when the retrieved context contains direct supporting details for that exact section. Otherwise omit them.\n";
+  userPrompt +=
+    "Keep the details brief and scannable for a simple hand-out flyer.\n";
+  userPrompt += "\nRetrieved RAG context:\n";
+  userPrompt += retrievedContext;
   return userPrompt.slice(0, maxChars);
 }
 
 export type Day5BrochureResult = {
   markdown: string;
   selectedLinks: SelectedLink[];
+  retrievedSources: RagSource[];
 };
 
 /**
- * Full Day 5 pipeline: multi-page scrape + two LLM calls (links, then brochure).
+ * Full smart brochure pipeline: LLM link selection + scrape + keyword RAG retrieval + generation.
  */
 export async function runDay5Brochure(options: {
   companyName: string;
@@ -233,26 +284,28 @@ export async function runDay5Brochure(options: {
 
   const backend = getLlmBackend();
   if (!backend) {
-    throw new Error("No Gemini API key (set GEMINI_API_KEY)");
+    throw new Error("No Groq API key (set GROQ_API_KEY)");
   }
 
-  const { text: details, selectedLinks } = await gatherAllDetails(
+  const { context, selectedLinks, retrievedSources } = await gatherRagContext(
     pageUrl,
+    companyName,
     landingHtml,
+    tone,
     maxExtraPages
   );
 
   const userContent = brochureUserPrompt(
     companyName,
     pageUrl,
-    details,
+    context,
     maxContextChars
   );
 
-  const markdown = await geminiGenerate({
+  const markdown = await groqGenerate({
     systemInstruction: brochureSystemPrompt(tone),
     prompt: userContent,
   });
 
-  return { markdown, selectedLinks };
+  return { markdown, selectedLinks, retrievedSources };
 }

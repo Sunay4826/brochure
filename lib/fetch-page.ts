@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { assertPublicHttpUrl } from "./ssrf";
 
 /** Mirrors the course `Website` class headers (day5 / day2 notebook). */
 export const FETCH_HEADERS = {
@@ -7,6 +8,36 @@ export const FETCH_HEADERS = {
   Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
 };
+
+export async function fetchPublicUrl(
+  url: string,
+  init?: RequestInit,
+  maxRedirects = 5
+): Promise<Response> {
+  let current = assertPublicHttpUrl(url).toString();
+
+  for (let i = 0; i <= maxRedirects; i++) {
+    const res = await fetch(current, {
+      ...init,
+      redirect: "manual",
+    });
+
+    if (![301, 302, 303, 307, 308].includes(res.status)) {
+      return res;
+    }
+
+    const location = res.headers.get("location");
+    if (!location) {
+      return res;
+    }
+
+    current = assertPublicHttpUrl(
+      new URL(location, current).toString()
+    ).toString();
+  }
+
+  throw new Error("Too many redirects");
+}
 
 export type ParsedPage = {
   title: string;

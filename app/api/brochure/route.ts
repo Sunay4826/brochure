@@ -4,9 +4,10 @@ import { assertPublicHttpUrl } from "@/lib/ssrf";
 import { extractBrochureFromHtml } from "@/lib/extract-brochure";
 import { enhanceBrochureWithAi } from "@/lib/ai-brochure";
 import { runDay5Brochure } from "@/lib/day5-brochure";
-import { FETCH_HEADERS } from "@/lib/fetch-page";
+import { FETCH_HEADERS, fetchPublicUrl } from "@/lib/fetch-page";
 import { ensureBrochureEnvLoaded } from "@/lib/ensure-env";
 import { hasAnyLlmKey } from "@/lib/llm-provider";
+import type { RagSource } from "@/lib/rag";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -46,9 +47,8 @@ async function fetchHtmlWithFallback(url: string): Promise<{
   html?: string;
   usedFallback?: boolean;
 }> {
-  const primary = await fetch(url, {
+  const primary = await fetchPublicUrl(url, {
     headers: FETCH_HEADERS,
-    redirect: "follow",
     signal: AbortSignal.timeout(25_000),
   });
 
@@ -70,8 +70,7 @@ async function fetchHtmlWithFallback(url: string): Promise<{
         /^https?:\/\//,
         ""
       )}`;
-      const proxied = await fetch(proxyUrl, {
-        redirect: "follow",
+      const proxied = await fetchPublicUrl(proxyUrl, {
         signal: AbortSignal.timeout(25_000),
       });
       if (proxied.ok) {
@@ -128,13 +127,14 @@ export async function POST(req: NextRequest) {
     let selectedLinks:
       | { type: string; url: string }[]
       | undefined;
+    let ragSources: RagSource[] | undefined;
 
     if (mode === "day5") {
       if (!hasAnyLlmKey()) {
         return NextResponse.json(
           {
             error:
-              "Smart brochure needs a Gemini API key. Add GEMINI_API_KEY (or GOOGLE_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY) to self/.env, self/.env.local, brochure-web/.env, or brochure-web/.env.local — then restart `npm run dev`.",
+              "Smart brochure needs a Groq API key. Add GROQ_API_KEY to .env.local, then restart the app.",
           },
           { status: 400 }
         );
@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
         });
         markdownBrochure = day5.markdown;
         selectedLinks = day5.selectedLinks;
+        ragSources = day5.retrievedSources;
         aiUsed = true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Day 5 brochure failed.";
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
           lower.includes("too many requests") ||
           lower.includes("rate limit");
 
-        // If the LLM is unavailable (common with Gemini free-tier quotas), fall back to layout mode.
+        // If the LLM is unavailable, fall back to layout mode for quota/rate-limit cases.
         if (quotaOrRateLimited) {
           return NextResponse.json({
             ok: true as const,
@@ -170,6 +171,7 @@ export async function POST(req: NextRequest) {
             mode: "layout" as const,
             markdownBrochure: undefined,
             selectedLinks: undefined,
+            ragSources: undefined,
             warning:
               "LLM quota/rate limit reached. Showing a non-LLM brochure layout instead.",
           });
@@ -194,6 +196,7 @@ export async function POST(req: NextRequest) {
       mode,
       markdownBrochure,
       selectedLinks,
+      ragSources,
       warning: fetched.usedFallback
         ? "This site blocked direct fetching (403). Used a text-only fallback, so results may be less accurate."
         : undefined,
