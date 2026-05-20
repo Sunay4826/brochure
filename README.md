@@ -6,6 +6,8 @@ Welcome to Brochure, a modern web application that transforms public websites in
 
 Brochure is built for fast content repurposing. Paste a website URL, generate a polished brochure preview, switch between output styles, and print or save the result as a PDF. Whether you want a quick one-page flyer or a smarter AI-assisted brochure, the app keeps the process simple and efficient.
 
+Live app: https://brochure-pearl-xi.vercel.app
+
 ## Features of Brochure
 
 - Website to Brochure Conversion: Turn any public web page into a structured brochure in seconds.
